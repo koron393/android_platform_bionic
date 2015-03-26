@@ -29,7 +29,7 @@
 #include "linker_phdr.h"
 
 #include <errno.h>
-#include <machine/exec.h>
+#include <string.h>
 #include <sys/mman.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -37,6 +37,20 @@
 
 #include "linker.h"
 #include "linker_debug.h"
+
+static int GetTargetElfMachine() {
+#if defined(__arm__)
+  return EM_ARM;
+#elif defined(__aarch64__)
+  return EM_AARCH64;
+#elif defined(__i386__)
+  return EM_386;
+#elif defined(__mips__)
+  return EM_MIPS;
+#elif defined(__x86_64__)
+  return EM_X86_64;
+#endif
+}
 
 /**
   TECHNICAL NOTE ON ELF LOADING.
@@ -200,7 +214,7 @@ bool ElfReader::VerifyElfHeader() {
     return false;
   }
 
-  if (header_.e_machine != ELF_TARG_MACH) {
+  if (header_.e_machine != GetTargetElfMachine()) {
     DL_ERR("\"%s\" has unexpected e_machine: %d", name_, header_.e_machine);
     return false;
   }
@@ -318,7 +332,7 @@ bool ElfReader::ReserveAddressSpace(const android_dlextinfo* extinfo) {
       return false;
     }
     int mmap_flags = MAP_PRIVATE | MAP_ANONYMOUS;
-    start = mmap(addr, load_size_, PROT_NONE, mmap_flags, -1, 0);
+    start = mmap(nullptr, load_size_, PROT_NONE, mmap_flags, -1, 0);
     if (start == MAP_FAILED) {
       DL_ERR("couldn't reserve %zd bytes of address space for \"%s\"", load_size_, name_);
       return false;
@@ -675,7 +689,7 @@ int phdr_table_map_gnu_relro(const ElfW(Phdr)* phdr_table, size_t phdr_count, El
  */
 int phdr_table_get_arm_exidx(const ElfW(Phdr)* phdr_table, size_t phdr_count,
                              ElfW(Addr) load_bias,
-                             ElfW(Addr)** arm_exidx, unsigned* arm_exidx_count) {
+                             ElfW(Addr)** arm_exidx, size_t* arm_exidx_count) {
   const ElfW(Phdr)* phdr = phdr_table;
   const ElfW(Phdr)* phdr_limit = phdr + phdr_count;
 
@@ -685,7 +699,7 @@ int phdr_table_get_arm_exidx(const ElfW(Phdr)* phdr_table, size_t phdr_count,
     }
 
     *arm_exidx = reinterpret_cast<ElfW(Addr)*>(load_bias + phdr->p_vaddr);
-    *arm_exidx_count = (unsigned)(phdr->p_memsz / 8);
+    *arm_exidx_count = phdr->p_memsz / 8;
     return 0;
   }
   *arm_exidx = nullptr;
@@ -722,9 +736,9 @@ void phdr_table_get_dynamic_section(const ElfW(Phdr)* phdr_table, size_t phdr_co
   }
 }
 
-// Returns the address of the program header table as it appears in the loaded
-// segments in memory. This is in contrast with 'phdr_table_' which
-// is temporary and will be released before the library is relocated.
+// Sets loaded_phdr_ to the address of the program header table as it appears
+// in the loaded segments in memory. This is in contrast with phdr_table_,
+// which is temporary and will be released before the library is relocated.
 bool ElfReader::FindPhdr() {
   const ElfW(Phdr)* phdr_limit = phdr_table_ + phdr_num_;
 
@@ -744,7 +758,7 @@ bool ElfReader::FindPhdr() {
         ElfW(Addr)  elf_addr = load_bias_ + phdr->p_vaddr;
         const ElfW(Ehdr)* ehdr = reinterpret_cast<const ElfW(Ehdr)*>(elf_addr);
         ElfW(Addr)  offset = ehdr->e_phoff;
-        return CheckPhdr((ElfW(Addr))ehdr + offset);
+        return CheckPhdr(reinterpret_cast<ElfW(Addr)>(ehdr) + offset);
       }
       break;
     }

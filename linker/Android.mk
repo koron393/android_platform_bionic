@@ -16,9 +16,12 @@ LOCAL_SRC_FILES_arm     := arch/arm/begin.S
 LOCAL_SRC_FILES_arm64   := arch/arm64/begin.S
 LOCAL_SRC_FILES_x86     := arch/x86/begin.c
 LOCAL_SRC_FILES_x86_64  := arch/x86_64/begin.S
-LOCAL_SRC_FILES_mips    := arch/mips/begin.S
-LOCAL_SRC_FILES_mips64  := arch/mips64/begin.S
+LOCAL_SRC_FILES_mips    := arch/mips/begin.S linker_mips.cpp
+LOCAL_SRC_FILES_mips64  := arch/mips64/begin.S linker_mips.cpp
 
+# -shared is used to overwrite the -Bstatic and -static
+# flags triggered by LOCAL_FORCE_STATIC_EXECUTABLE.
+# This dynamic linker is actually a shared object linked with static libraries.
 LOCAL_LDFLAGS := \
     -shared \
     -Wl,-Bsymbolic \
@@ -35,6 +38,11 @@ LOCAL_CONLYFLAGS += \
 
 LOCAL_CPPFLAGS += \
     -std=gnu++11 \
+    -Wold-style-cast \
+
+ifeq ($(TARGET_IS_64_BIT),true)
+LOCAL_CPPFLAGS += -DTARGET_IS_64_BIT
+endif
 
 # We need to access Bionic private headers in the linker.
 LOCAL_CFLAGS += -I$(LOCAL_PATH)/../libc/
@@ -45,13 +53,11 @@ LOCAL_NO_CRT := true
 # TODO: split out the asflags.
 LOCAL_ASFLAGS := $(LOCAL_CFLAGS)
 
-LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk $(LOCAL_PATH)/linker_executable.mk
+LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 
 LOCAL_STATIC_LIBRARIES := libc_nomalloc
 
-LOCAL_FORCE_STATIC_EXECUTABLE := true # not necessary when not including BUILD_EXECUTABLE
-
-LOCAL_2ND_ARCH_VAR_PREFIX := $(linker_2nd_arch_var_prefix)
+LOCAL_FORCE_STATIC_EXECUTABLE := true
 
 LOCAL_MODULE := linker
 LOCAL_MODULE_STEM_32 := linker
@@ -62,17 +68,12 @@ LOCAL_MULTILIB := both
 # meaningful name resolution.
 LOCAL_STRIP_MODULE := keep_symbols
 
-include $(LOCAL_PATH)/linker_executable.mk
-ifdef TARGET_2ND_ARCH
-LOCAL_2ND_ARCH_VAR_PREFIX := $(TARGET_2ND_ARCH_VAR_PREFIX)
-OVERRIDE_BUILT_MODULE_PATH :=
-LOCAL_BUILT_MODULE :=
-LOCAL_INSTALLED_MODULE :=
-LOCAL_MODULE_STEM :=
-LOCAL_BUILT_MODULE_STEM :=
-LOCAL_INSTALLED_MODULE_STEM :=
-LOCAL_INTERMEDIATE_TARGETS :=
-include $(LOCAL_PATH)/linker_executable.mk
-endif
+# Insert an extra objcopy step to add prefix to symbols.
+# Note we are using "=" instead of ":=" to defer the evaluation,
+# because LOCAL_2ND_ARCH_VAR_PREFIX or linked_module isn't set properly yet at this point.
+LOCAL_POST_LINK_CMD = $(hide) $($(LOCAL_2ND_ARCH_VAR_PREFIX)TARGET_OBJCOPY) \
+  --prefix-symbols=__dl_ $(linked_module)
+
+include $(BUILD_EXECUTABLE)
 
 include $(call first-makefiles-under,$(LOCAL_PATH))

@@ -20,6 +20,7 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <android/dlext.h>
 
 #include <bionic/pthread_internal.h>
@@ -29,7 +30,7 @@
 
 /* This file hijacks the symbols stubbed out in libdl.so. */
 
-static pthread_mutex_t g_dl_mutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER;
+static pthread_mutex_t g_dl_mutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
 
 static const char* __bionic_set_dlerror(char* new_value) {
   char** dlerror_slot = &reinterpret_cast<char**>(__get_tls())[TLS_SLOT_DLERROR];
@@ -145,7 +146,7 @@ int dladdr(const void* addr, Dl_info* info) {
   info->dli_fbase = reinterpret_cast<void*>(si->base);
 
   // Determine if any symbol in the library contains the specified address.
-  ElfW(Sym)* sym = dladdr_find_symbol(si, addr);
+  ElfW(Sym)* sym = si->find_symbol_by_address(addr);
   if (sym != nullptr) {
     info->dli_sname = si->get_string(sym->st_name);
     info->dli_saddr = reinterpret_cast<void*>(si->resolve_symbol_address(sym));
@@ -232,20 +233,21 @@ static unsigned g_libdl_chains[] = { 0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 0 };
 static unsigned g_libdl_chains[] = { 0, 2, 3, 4, 5, 6, 7, 8, 9, 0 };
 #endif
 
-static soinfo __libdl_info("libdl.so", nullptr, 0);
+static soinfo __libdl_info("libdl.so", nullptr, 0, RTLD_GLOBAL);
 
 // This is used by the dynamic linker. Every process gets these symbols for free.
 soinfo* get_libdl_info() {
-  if ((__libdl_info.flags & FLAG_LINKED) == 0) {
-    __libdl_info.flags |= FLAG_LINKED;
-    __libdl_info.strtab = ANDROID_LIBDL_STRTAB;
-    __libdl_info.symtab = g_libdl_symtab;
-    __libdl_info.nbucket = sizeof(g_libdl_buckets)/sizeof(unsigned);
-    __libdl_info.nchain = sizeof(g_libdl_chains)/sizeof(unsigned);
-    __libdl_info.bucket = g_libdl_buckets;
-    __libdl_info.chain = g_libdl_chains;
-    __libdl_info.ref_count = 1;
-    __libdl_info.strtab_size = sizeof(ANDROID_LIBDL_STRTAB);
+  if ((__libdl_info.flags_ & FLAG_LINKED) == 0) {
+    __libdl_info.flags_ |= FLAG_LINKED;
+    __libdl_info.strtab_ = ANDROID_LIBDL_STRTAB;
+    __libdl_info.symtab_ = g_libdl_symtab;
+    __libdl_info.nbucket_ = sizeof(g_libdl_buckets)/sizeof(unsigned);
+    __libdl_info.nchain_ = sizeof(g_libdl_chains)/sizeof(unsigned);
+    __libdl_info.bucket_ = g_libdl_buckets;
+    __libdl_info.chain_ = g_libdl_chains;
+    __libdl_info.ref_count_ = 1;
+    __libdl_info.strtab_size_ = sizeof(ANDROID_LIBDL_STRTAB);
+    __libdl_info.local_group_root_ = &__libdl_info;
   }
 
   return &__libdl_info;
